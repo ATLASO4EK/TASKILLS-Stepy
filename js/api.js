@@ -1,117 +1,108 @@
+const API_URL = 'http://127.0.0.1:8000'
+
 const Api = (() => {
-  const KEY = { guides: 'sg2_guides', users: 'sg2_users', session: 'sg2_user', progress: 'sg2_progress' };
-  const RESERVED = ['admin']; // автор стартовых гайдиков
+  const KEY = { user: 'sg2_user', token: 'sg2_token' };
+  const load = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) {return null; } };
+  const clearSession = () => { localStorage.removeItem(KEY.user); localStorage.removeItem(KEY.token); };
 
-  const load = (key, fallback) => {
+  const request = async (method, path, body, auth = true) => {
+    const headers = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const token = localStorage.getItem(KEY.token);
+    if (token) headers['Authorization'] = 'Bearer' + token;
+    let res;
     try {
-      const v = JSON.parse(localStorage.getItem(key));
-      return v === null ? fallback : v;
-    } catch (e) {
-      return fallback;
+      res = await fetch(API_URL + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined});
+    } catch (e) { throw Object.assign(new Error('network'), { status: 0 }); }
+    if (res.status === 401 && auth) {
+      clearSession(); location.href = 'index.html';
+      throw Object.assign(new Error('auth'), { status: 401});
     }
+    let data = null;
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw Object.assign(new Error('https_' + res.status), { status: res.status});
+    return data;
   };
-  const store = (key, value) => localStorage.setItem(key, JSON.stringify(value));
-
-  const seed = [
-    { id: 'g1', title: 'как играть в доту', author: 'admin',
-      description: 'гайд игры в дотку для чайников.',
-      steps: [
-        { text: 'скачать доту в стиме' }, { text: 'зайти в игру' },
-        { text: 'сгонять одну каточку', image: 'img/dota.png' },
-        { text: 'обматерить союзников' }, { text: 'выйти с доты' },
-        { text: 'удалить доту. все готово, ты krasava marat!' }] },
-    { id: 'g2', title: 'что такое газява', author: 'admin',
-      description: 'газява - эта кока-кола, но не ток(',
-      steps: [
-        { text: 'дойти до магазина' }, { text: 'найти газяву' },
-        { text: 'взять бутылку газявы', image: 'img/gazyava.png' },
-        { text: 'купить' }, { text: 'выпить' }] },
-    { id: 'g3', title: 'геншин фу', author: 'admin',
-      description: 'Genshin Impact дай гемов',
-      steps: [
-        { text: 'скачать Геншин и пройти сюжет монда хотяб' }, { text: 'нафармить 160 примогемов' },
-        { text: 'покрутить и ниче не выпадет', image: 'img/genshin.png' },
-        { text: 'сказать "ну и фу эти гачи"' }, { text: 'выйти' },
-        { text: 'удалить' }] }
-  ];
-  if (load(KEY.guides, null) === null) store(KEY.guides, seed);
-
-  const hash = async (password, salt) => {
-    const bytes = new TextEncoder().encode(salt + password);
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+  
+  const saveSession = d => {
+    localStorage.setItem(KEY.token, d.access_token);
+    localStorage.setItem(KEY.user, JSON.stringify({ id: d.user.id, name: d.user.nickname, email: d.user.email, isadmin:d.user.isadmin}));
   };
-  const newSalt = () => Array.from(crypto.getRandomValues(new Uint8Array(8)))
-    .map(b => b.toString(16).padStart(2, '0')).join('');
+  const authError = e => new Error(e.status === 422? 'short' : e.status === 400 ? 'taken' : e.status === 401 ? 'wrong' : 'network');
 
-  const cleanName = name => String(name).trim();
-  const currentName = () => {
-    const u = load(KEY.session, null);
-    return u && u.name;
+  //ник автора(свой ник либ айдишник)
+  const toGuide = g => {
+    const me = load(KEY.user);
+    return {id: g.guide_id, title: g.guide_name, description: g.description, photo: g.photo || '',
+      author: g.author, authorName: g.author_nickname || (me && me.id === g.author ? me.name : '#' + g.author)
+    };
   };
-  const progressKey = id => currentName() + ':' + id;
 
-  // Existing numeric marks identify steps in the order stored before the upgrade.
-  const legacyStepId = index => 'legacy-' + index;
-  const readGuides = () => load(KEY.guides, []).map(guide => ({
-    ...guide,
-    steps: guide.steps.map((step, index) => ({ ...step, id: step.id || legacyStepId(index) }))
-  }));
-  const newStepId = () => 'step-' + Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-');
+  const toStep = s => ({ id: s.step, text: s.url || '', image: s.photo || ''});
+  
+  const allGuides = async (q = '') => {
+    const out = [];
+    for (let page = 1; ; page++) {
+      let rows;
+      try { rows = await request('GET', `/guides?limit=100&page=${page}` + (q ? '&q=' + encodeURIComponent(q) : ''));}
+      catch (e) { if (e.status === 404) break; throw e; }
+      out.push(...rows);
+      if (rows.length < 100) break;
+    }
+    return out.map(toGuide);
+  };
 
   return {
-    user: () => load(KEY.session, null),
-    async register(name, password) {
-      name = cleanName(name);
-      const users = load(KEY.users, {});
-      if (name.length < 2 || name.length > 20 || password.length < 4) throw new Error('short');
-      if (users[name] || RESERVED.includes(name.toLowerCase())) throw new Error('taken');
-      const salt = newSalt();
-      users[name] = { salt, hash: await hash(password, salt) };
-      store(KEY.users, users);
-      store(KEY.session, { name });
-    },
-    async login(name, password) {
-      name = cleanName(name);
-      const record = load(KEY.users, {})[name];
-      if (!record || record.hash !== await hash(password, record.salt)) throw new Error('wrong');
-      store(KEY.session, { name });
-    },
-    logout() { localStorage.removeItem(KEY.session); },
+    user: () => (localStorage.getItem(KEY.token) ? load(KEY.user) : null),
 
-    list: readGuides,
-    get: id => readGuides().find(g => g.id === id),
-    save(guide) {
-      const author = currentName();
-      if (!author) throw new Error('auth');
-      const all = readGuides();
-      guide.steps = guide.steps.map(step => ({ ...step, id: step.id || newStepId() }));
-      const i = all.findIndex(x => x.id === guide.id);
-      if (i < 0) {
-        guide.id = 'g' + Date.now();
-        guide.author = author;
-        all.push(guide);
-      } else if (all[i].author !== author) {
-        throw new Error('forbidden');
-      } else {
-        all[i] = guide;
-      }
-      store(KEY.guides, all);
-      return guide;
+    async register(email, nickname, password) {
+      try { saveSession(await request('POST', '/register', { email: email.trim(), nickname:nickname.trim(), password, isadmin:false }, false)); }
+      catch (e) { throw authError(e); }
     },
-    fork(id) {
-      const source = this.get(id);
-      return this.save({ ...source, id: null, title: source.title + ' (fork)' });
+    async login(email, password) {
+      try { saveSession(await request('POST', '/login', {email: email.trim(), password }, false)); }
+      catch (e) {throw authError(e); }
     },
-    progress(id, steps = this.get(id)?.steps || []) {
-      const saved = load(KEY.progress, {})[progressKey(id)] || [];
-      const marked = new Set(saved.map(value => Number.isInteger(value) ? legacyStepId(value) : value));
-      return steps.filter(step => marked.has(step.id)).map(step => step.id);
+    logout: clearSession,
+
+    list: q => allGuides(q),
+    async get(id) {
+      const g = (await allGuides()).find(x => String(x.id) === String(id));
+      if (!g) return null;
+      const steps = await request ('GET', `/guides/${g.id}/steps`);
+      return { ...g, steps: steps.map(toStep) };
     },
-    setProgress(id, done) {
-      const all = load(KEY.progress, {});
-      all[progressKey(id)] = done;
-      store(KEY.progress, all);
+    async save(guide) {
+      const body = { guide_name: guide.title, description: guide.description, photo: guide.photo || '' };
+      let id = guide.id, existing = [];
+      try {
+        if (id) {
+          await request('PATCH', '/guides', { guide_id: Number(id), ...body});
+          existing = (await request('GET', `/guides/${id}/steps`)).map(s => s.step);
+        } else {
+          id = (await request('POST', '/guides', body)).guide_id;
+        }
+        const have = new Set(existing);
+        for (let i = 0; i < guide.steps.length; i++) {
+          const n = i + 1, s = guide.steps[i], p = { url: s.text, photo: s.image || null};
+          if (have.has(n)) await request('PATCH', `/guides/${id}/steps/${n}`, p);
+          else await request('POST', `/guides/${id}/steps/`, { step: n, ...p });
+        }
+        for (const n of existing) if (n > guide.steps.length) await request('DELETE', `/guides/${id}/steps/${n}`);
+      } catch (e) { throw e.status === 403 ? new Error ('forbidden') : e; }
+      return { id };
+    },
+    async fork(id) { return { id: (await request('POST', `/guides/${id}/fork`)).guide_id};},
+
+    async progress(id) {
+      const r = await request('GET', `/guides/${id}/progress`);
+      return { done: r.completed_steps, total: r.total_steps };
+    },
+    async completeStep(id, step) {
+      try { await request('POST', `/guides/${id}/steps/${step}/complete`); } catch (e) { if (e.status !== 400) throw e; }
+    },
+    async uncompleteStep(id, step) {
+      try { await request('DELETE', `/guides/${id}/steps/${step}/complete`); } catch (e) { if (e.status !== 404) throw e; }
     }
   };
 })();
