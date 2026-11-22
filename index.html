@@ -18,14 +18,16 @@
       <div class="card-body">
         <h2 class="h5 mb-3" data-i18n="login"></h2>
         <form id="authForm">
-          <input id="login" class="form-control mb-2" required minlength="2" maxlength="20" autocomplete="username"
-            data-i18n-ph="name">
+          <input id="email" type="email" class="form-control mb-2" required autocomplete="email" data-i18n-ph="email">
+          <div>
+            <input id="nickname" class="form-control mb-2" maxlength="20" autocomplete="nickname" data-i18n-ph="nick">
+          </div>
           <input id="password" type="password" class="form-control mb-2" required minlength="4" autocomplete="current-password"
             data-i18n-ph="pass">
           <div class="text-danger small mb-2" id="authError"></div>
           <div class="d-flex gap-2">
-            <button class="btn btn-primary flex-fill" value="login" data-i18n="enter"></button>
-            <button class="btn btn-outline-primary flex-fill" value="register" data-i18n="register"></button>
+            <button id="loginBtn" class="btn btn-primary flex-fill" value="login" data-i18n="enter"></button>
+            <button id="registerBtn" class="btn btn-outline-primary flex-fill" value="register" data-i18n="register"></button>
           </div>
         </form>
       </div>
