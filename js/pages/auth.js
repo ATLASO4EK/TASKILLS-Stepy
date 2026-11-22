@@ -1,16 +1,35 @@
 if (Api.user()) location.href = 'catalog.html';
 document.getElementById('langBtn').onclick = Lang.toggle;
 
+const nickWrap = document.getElementById('nickWrap');
+const errBox = document.getElementById('authError');
+
+//Регистрация
+document.getElementById('loginBtn').onclick = () => nickWrap.classList.add('d-none');
+document.getElementById('registerBtn').onclick = e => {
+  if (nickWrap.classList.contains('d-none')) {
+    e.preventDefault();
+    nickWrap.classList.remove('d-none');
+    document.getElementById('nickname').focus();
+  }
+};
+
 document.getElementById('authForm').onsubmit = async e => {
   e.preventDefault();
-  const name = document.getElementById('login').value;
+  errBox.textContent = '';
+  const email = document.getElementById('email').value;
+  const nickname = document.getElementById('nickname').value.trim();
   const password = document.getElementById('password').value;
-  const action = e.submitter.value; 
   try {
-    await Api[action](name, password);
+    if (e.submitter.valeu === 'register') {
+      if (nickname.length < 2 || nickname.length > 20) throw new Error('short');
+      await Api.register(email, nickname, password);
+    } else {
+      await Api.login(email, password);
+    }
     location.href = 'catalog.html';
   } catch (err) {
-    document.getElementById('authError').textContent = Lang.t('err_' + err.message);
+    errBox.textContent = Lang.t('err_' + err.message);
   }
 };
 Lang.apply();

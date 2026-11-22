@@ -1,11 +1,16 @@
-(() => {
+(async() => {
   UI.navbar();
   const $ = id => document.getElementById(id);
   const id = UI.param('id');
-  const g = (id && Api.get(id)) || { title: '', description: '', steps: [{ text: '', image: '' }] };
-  if (id && g.author !== Api.user().name) { location.href = 'guide.html?id=' + encodeURIComponent(id); return; }
+  let g = null;
+  try { g = id ? await Api.get(id) : null; }
+  catch (e) { alert(Lang.t(e.message === 'network' ? 'err_network' : 'loadError')); return; }
+  if (id && !g) { location.href = 'catalog.html'; return; }
+  g = g || { title: '', description: '', photo: '',steps: [{ text: '', image: ''}] };
+  if (id && g.author !== Api.user().id) { location.href = 'guide.html?id=' + encodeURIComponent(id); return; }
 
-  const steps = g.steps.map(s => ({ id: s.id, text: s.text, image: s.image || '' }));
+  const steps = g.steps.map(s => ({ text: s.text, image: s.image || '' }));
+  if (!steps.length) steps.push({ text: '', image: ''});
   $('fTitle').value = g.title; $('fDesc').value = g.description;
   $('pageTitle').dataset.i18n = id ? 'editGuide' : 'newGuide';
 
@@ -53,17 +58,17 @@
   };
   $('addStep').onclick = () => { steps.push({ text: '', image: '' }); render(); };
 
-  $('editorForm').onsubmit = e => {
+  $('editorForm').onsubmit = async e => {
     e.preventDefault();
-    const clean = steps.map(s => ({ id: s.id, text: s.text.trim(), image: UI.safeUrl(s.image.trim()) })).filter(s => s.text);
+    const clean = steps.map(s => ({ text: s.text.trim(), image: UI.safeUrl(s.image.trim()) })).filter(s => s.text);
     if (!$('fTitle').value.trim() || !clean.length) { alert(Lang.t('needTitle')); return; }
     try {
-      const saved = Api.save(Object.assign({}, g, {
+      const saved = await Api.save({
         id: id || null, title: $('fTitle').value.trim(), description: $('fDesc').value.trim(),
-        steps: clean
-      }));
+        photo: g.photo, steps: clean
+      });
       location.href = 'guide.html?id=' + encodeURIComponent(saved.id);
-    } catch (err) { alert(Lang.t('noRights')); }
+    } catch (err) { alert(Lang.t(err.message ==='forbidden' ? 'noRights' : 'saveError')); }
   };
   render();
 })();
