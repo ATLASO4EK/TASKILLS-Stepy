@@ -1,4 +1,4 @@
-const API_URL = 'http://127.0.0.1:5500'
+const API_URL = 'http://127.0.0.1:8000'
 
 const Api = (() => {
   const KEY = { user: 'sg2_user', token: 'sg2_token' };
@@ -9,7 +9,7 @@ const Api = (() => {
     const headers = {};
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const token = localStorage.getItem(KEY.token);
-    if (token) headers['Authorization'] = 'Bearer' + token;
+    if (token) headers['Authorization'] = 'Bearer ' + token;
     let res;
     try {
       res = await fetch(API_URL + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined});
@@ -86,7 +86,7 @@ const Api = (() => {
         for (let i = 0; i < guide.steps.length; i++) {
           const n = i + 1, s = guide.steps[i], p = { url: s.text, photo: s.image || null};
           if (have.has(n)) await request('PATCH', `/guides/${id}/steps/${n}`, p);
-          else await request('POST', `/guides/${id}/steps/`, { step: n, ...p });
+          else await request('POST', `/guides/${id}/steps`, { step: n, ...p });
         }
         for (const n of existing) if (n > guide.steps.length) await request('DELETE', `/guides/${id}/steps/${n}`);
       } catch (e) { throw e.status === 403 ? new Error ('forbidden') : e; }
