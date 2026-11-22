@@ -7,6 +7,9 @@ from src.models.users import UserModel
 from src.models.guides import GuideModel
 from src.api.dependencies import SessionDep
 from src.api.auth import get_current_user
+from src.schemas.guides import GuideForkSchema
+from src.models.guide_steps import GuideStepModel
+from src.api.guide_steps import get_guide_or_404
 
 router = APIRouter()
 
@@ -158,3 +161,62 @@ async def delete_guide(
     await session.commit()
 
     return {"status": "ok"}
+
+@router.post("/guides/{guide_id}/fork")
+async def fork_guide(
+    guide_id: int,
+    session: SessionDep,
+    data: GuideForkSchema | None = None,
+    current_user: UserModel = Depends(get_current_user)
+):
+    original = await get_guide_or_404(guide_id, session)
+
+    # Все шаги оригинала.
+    result = await session.execute(
+        select(GuideStepModel).where(
+            GuideStepModel.guide_id == guide_id
+        ).order_by(GuideStepModel.step)
+    )
+    steps = result.scalars().all()
+
+    # guide_name уникален, поэтому копии нужно другое имя.
+    new_name = (data.guide_name.strip() if data and data.guide_name else "")
+    if not new_name:
+        new_name = f"{original.guide_name} (copy)"
+
+    new_guide = GuideModel(
+        author=current_user.id,
+        guide_name=new_name,
+        description=original.description,
+        photo=original.photo
+    )
+
+    try:
+        session.add(new_guide)
+        await session.flush()  # получаем guide_id новой записи
+
+        session.add_all([
+            GuideStepModel(
+                guide_id=new_guide.guide_id,
+                step=s.step,
+                url=s.url,
+                photo=s.photo
+            )
+            for s in steps
+        ])
+
+        # Гайд и шаги сохраняются одной транзакцией.
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Guide with this name already exists, pass another guide_name"
+        )
+
+    return {
+        "status": "ok",
+        "guide_id": new_guide.guide_id,
+        "forked_from": guide_id,
+        "steps_copied": len(steps)
+    }
