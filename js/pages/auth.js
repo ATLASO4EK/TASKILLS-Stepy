@@ -21,7 +21,7 @@ document.getElementById('authForm').onsubmit = async e => {
   const nickname = document.getElementById('nickname').value.trim();
   const password = document.getElementById('password').value;
   try {
-    if (e.submitter.valeu === 'register') {
+    if (e.submitter.value === 'register') {
       if (nickname.length < 2 || nickname.length > 20) throw new Error('short');
       await Api.register(email, nickname, password);
     } else {
