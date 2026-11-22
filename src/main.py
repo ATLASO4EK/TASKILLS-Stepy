@@ -12,5 +12,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_HOSTS"),
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 app.include_router(main_router)
