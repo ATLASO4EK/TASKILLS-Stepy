@@ -1,4 +1,15 @@
-const API_URL = 'http://127.0.0.1:8000'
+const API_URL = (() => {
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', '/hosts.env', false); // same-origin, static file
+    xhr.send();
+    if (xhr.status === 200) {
+      const m = xhr.responseText.match(/^API_URL=(.+)$/m);
+      if (m) return m[1].trim();
+    }
+  } catch (e) {}
+  return 'http://127.0.0.1:8000'; // local dev fallback
+})();
 
 const Api = (() => {
   const KEY = { user: 'sg2_user', token: 'sg2_token' };
