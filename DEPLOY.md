@@ -2,6 +2,8 @@
 
 Deploying Stepy to a VPS: **nginx (static frontend :80) + nginx (API proxy :8000) → uvicorn (127.0.0.1:8080, systemd) → PostgreSQL (127.0.0.1:5432)**, IP-only access (no domain/HTTPS), Linux user `stepy`.
 
+> `stepy` has **no password and no sudo rights** — the VPS needs no changes: SSH in as **root**, run privileged steps as root, and switch with `su - stepy` (no password needed) for user-level steps. See the table below.
+
 ## Placeholders used in this guide
 
 | Placeholder | Meaning |
@@ -9,6 +11,18 @@ Deploying Stepy to a VPS: **nginx (static frontend :80) + nginx (API proxy :8000
 | `YOUR_VPS_IP` | Public IP address of the VPS |
 | `DB_PASSWORD` | Generated PostgreSQL password (`openssl rand -hex 16`) |
 | `SECRET_KEY` | Generated JWT secret (`openssl rand -hex 32`) |
+
+## Which user runs what
+
+| Step | Run as |
+|---|---|
+| Step 1 — system packages | **root** |
+| Step 2 — PostgreSQL | **root** (`sudo -u postgres` works from root without a password prompt) |
+| Steps 3–6 — clone, venv, `src/.env`, first run | **`stepy`** (via `su - stepy`, no sudo needed) |
+| Steps 7–9 — systemd, nginx, firewall | **root** |
+| Steps 10–12 — hosts.env, smoke test, git pull | **`stepy`** (via `su - stepy`) |
+
+> **Never run steps 3–6 as root**: the clone, venv and config files would end up root-owned, breaking the systemd service (which runs as `stepy`) and later `git pull` (Step 12).
 
 ---
 
@@ -76,16 +90,16 @@ git push origin main
 
 ---
 
-## Step 1 — VPS system packages
+## Step 1 — VPS system packages (as root)
 
-SSH into the VPS as `stepy`, then:
+SSH into the VPS as **root**, then:
 
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y python3-venv python3-pip nginx postgresql ufw git openssl
 ```
 
-## Step 2 — PostgreSQL database
+## Step 2 — PostgreSQL database (as root)
 
 ```bash
 openssl rand -hex 16   # -> use the output as DB_PASSWORD below
@@ -93,7 +107,15 @@ sudo -u postgres psql -c "CREATE USER stepy WITH PASSWORD 'DB_PASSWORD';"
 sudo -u postgres psql -c "CREATE DATABASE stepy OWNER stepy;"
 ```
 
-## Step 3 — Get the code
+> As root, `sudo -u postgres` never prompts for a password — these commands work verbatim. Equivalent without sudo: `runuser -u postgres -- psql -c "..."`.
+
+## Step 3 — Get the code (as `stepy`)
+
+From your root session, switch to `stepy` (no password needed) and stay in this user for Steps 3–6:
+
+```bash
+su - stepy
+```
 
 ```bash
 git clone https://github.com/ATLASO4EK/TASKILLS-Stepy.git ~/app
@@ -103,7 +125,7 @@ cd ~/app
 > If the repo is private: clone locally with a token, then
 > `rsync -av --exclude .git ./ stepy@YOUR_VPS_IP:~/app/`
 
-## Step 4 — Python environment + dependencies
+## Step 4 — Python environment + dependencies (as `stepy`)
 
 ```bash
 python3 -m venv venv
@@ -113,7 +135,7 @@ venv/bin/pip install -r requirements.txt
 > If pip fails on any pinned version, install unpinned essentials instead:
 > `venv/bin/pip install fastapi uvicorn sqlalchemy psycopg python-dotenv PyJWT python-multipart aiosqlite pydantic email-validator`
 
-## Step 5 — Backend config `src/.env`
+## Step 5 — Backend config `src/.env` (as `stepy`)
 
 ```bash
 openssl rand -hex 32   # -> use the output as SECRET_KEY below
@@ -126,13 +148,13 @@ chmod 600 src/.env
 
 `postgresql+psycopg://` is the async psycopg3 driver, matching SQLAlchemy 2.x.
 
-## Step 6 — First backend run + create tables (one-time)
+## Step 6 — First backend run + create tables (one-time, as `stepy`)
 
 ```bash
 venv/bin/uvicorn src.main:app --host 127.0.0.1 --port 8080
 ```
 
-In a second terminal:
+In a second terminal (root is fine for curl):
 
 ```bash
 curl http://127.0.0.1:8080/docs                    # should return HTML
@@ -143,7 +165,9 @@ Stop uvicorn with `Ctrl+C`.
 
 > **Warning:** `/setup_database` is only for this one-time table creation. Do not call it again later.
 
-## Step 7 — systemd service
+## Step 7 — systemd service (as root)
+
+Leave the `stepy` shell first (`exit`), then:
 
 Create `/etc/systemd/system/stepy-api.service` (`sudo nano /etc/systemd/system/stepy-api.service`):
 
@@ -169,7 +193,7 @@ sudo systemctl enable --now stepy-api
 systemctl status stepy-api   # should be active (running)
 ```
 
-## Step 8 — nginx
+## Step 8 — nginx (as root)
 
 Create `/etc/nginx/sites-available/stepy`:
 
@@ -203,7 +227,7 @@ sudo nginx -t && sudo systemctl reload nginx
 chmod o+x /home/stepy   # required, otherwise nginx returns 403 on /home/stepy
 ```
 
-## Step 9 — Firewall
+## Step 9 — Firewall (as root)
 
 ```bash
 sudo ufw allow OpenSSH
@@ -212,9 +236,9 @@ sudo ufw allow 8000/tcp
 sudo ufw enable
 ```
 
-## Step 10 — Point the frontend at the API
+## Step 10 — Point the frontend at the API (as `stepy`)
 
-On the VPS:
+From root: `su - stepy`, then:
 
 ```bash
 cd ~/app
@@ -223,7 +247,7 @@ printf 'API_URL=http://YOUR_VPS_IP:8000\n' > hosts.env
 
 Do the same locally and push (`git add -f hosts.env && git commit && git push`).
 
-## Step 11 — Smoke test
+## Step 11 — Smoke test (from your browser)
 
 Open `http://YOUR_VPS_IP/index.html` in a browser:
 
@@ -231,18 +255,18 @@ Open `http://YOUR_VPS_IP/index.html` in a browser:
 2. Catalog loads without console errors (F12 → Network: requests go to `http://YOUR_VPS_IP:8000/...`)
 3. Create a guide with 2 steps → mark steps complete → fork it
 
-If something is broken:
+If something is broken (run from your **root** session):
 
 ```bash
 sudo journalctl -u stepy-api -f
 tail -f /var/log/nginx/error.log
 ```
 
-## Step 12 — Wrap-up
+## Step 12 — Wrap-up (as `stepy`)
 
-- Add the live URL to `README.md`
-- Push the deployment artifacts to `main` (hosts.env, this file, README changes)
-- On the VPS: `cd ~/app && git pull`
+- Add the live URL to `README.md` (locally)
+- Push the deployment artifacts to `main` (hosts.env, this file, README changes — from your local machine)
+- On the VPS (as `stepy`): `cd ~/app && git pull`
 
 ---
 
